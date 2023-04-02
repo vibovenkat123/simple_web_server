@@ -65,7 +65,9 @@ fn handle_paths(stream: TcpStream, request_type: &str, route_path: &str) {
     match request_type {
         "GET" => match route_path {
             "/" => routes::root::send(stream),
-            x if (x.strip_prefix("/echo/").is_some()) && !(x.strip_prefix("/echo/").unwrap().contains("/")) => {
+            x if (x.strip_prefix("/echo/").is_some())
+                && !(x.strip_prefix("/echo/").unwrap().contains("/")) =>
+            {
                 let x = decode(x.strip_prefix("/echo/").unwrap());
                 if x.is_err() {
                     routes::default::error::send(stream, STATUS_LINE_BAD_REQUEST, BAD_REQUEST);
