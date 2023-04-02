@@ -1,1 +1,1 @@
-pub mod notfound;
+pub mod error;
