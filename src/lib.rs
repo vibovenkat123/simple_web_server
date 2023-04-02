@@ -7,9 +7,46 @@ mod routes;
 use serde::Serialize;
 const STATUS_LINE_OK: &str = "HTTP/1.1 200 OK";
 const STATUS_LINE_NOT_FOUND: &str = "HTTP/1.1 404 NOT FOUND";
-const STATUS_LINE_BAD_REQUEST: &str = "HTTP/1.1 409 BAD REQUEST";
+//const STATUS_LINE_BAD_REQUEST: &str = "HTTP/1.1 409 BAD REQUEST";
 const NOT_FOUND: &str = "404 Not Found";
-const BAD_REQUEST: &str = "400 Bad Request";
+//const BAD_REQUEST: &str = "400 Bad Request";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_response() {
+        let test_info = InfoMsg {
+            msg: "Test".to_string(),
+        };
+        let serialized = serde_json::to_string(&test_info).unwrap();
+        let mut res = gen_json_response(STATUS_LINE_OK, &serialized);
+        let mut res_good = format!(
+            "{STATUS_LINE_OK}\r\nContent-Type: application/json\r\n\r\n{{\"msg\": \"Test\"}}"
+        );
+        res.retain(|char| !char.is_whitespace());
+        res_good.retain(|char| !char.is_whitespace());
+        assert_eq!(res, res_good);
+    }
+    #[test]
+    fn text_response() {
+        let text = "hello";
+        let length = text.len();
+        let res = gen_text_response(STATUS_LINE_OK, text);
+        let res_good = format!("{STATUS_LINE_OK}\r\nContent-Length: {length}\r\n\r\n{text}");
+        assert_eq!(res, res_good);
+    }
+    #[test]
+    fn text_encoded_response() {
+        let text = "hello world";
+        let encoded_text = "hello%20world";
+        let length = text.len();
+        let res = gen_text_response(STATUS_LINE_OK, encoded_text);
+        let res_good = format!("{STATUS_LINE_OK}\r\nContent-Length: {length}\r\n\r\n{text}");
+        assert_eq!(res, res_good);
+    }
+}
 
 #[derive(Serialize, Debug)]
 struct InfoMsg {
@@ -22,6 +59,7 @@ fn gen_json_response(status_line: &str, body: &str) -> String {
 }
 
 fn gen_text_response(status_line: &str, body: &str) -> String {
+    let body = decode(body).unwrap();
     let length = body.len();
     let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{body}");
     response
@@ -68,12 +106,8 @@ fn handle_paths(stream: TcpStream, request_type: &str, route_path: &str) {
             x if (x.strip_prefix("/echo/").is_some())
                 && !(x.strip_prefix("/echo/").unwrap().contains("/")) =>
             {
-                let x = decode(x.strip_prefix("/echo/").unwrap());
-                if x.is_err() {
-                    routes::default::error::send(stream, STATUS_LINE_BAD_REQUEST, BAD_REQUEST);
-                } else {
-                    routes::echo::send(stream, &x.unwrap());
-                }
+                let x = x.strip_prefix("/echo/").unwrap();
+                routes::echo::send(stream, &x);
             }
             _ => {
                 routes::default::error::send(stream, STATUS_LINE_NOT_FOUND, NOT_FOUND);
