@@ -1,6 +1,8 @@
 use std::{
     io::{prelude::*, BufReader},
     net::{TcpListener, TcpStream},
+    sync::{mpsc, Arc, Mutex},
+    thread,
 };
 use urlencoding::decode;
 mod routes;
@@ -10,6 +12,71 @@ const STATUS_LINE_NOT_FOUND: &str = "HTTP/1.1 404 NOT FOUND";
 //const STATUS_LINE_BAD_REQUEST: &str = "HTTP/1.1 409 BAD REQUEST";
 const NOT_FOUND: &str = "404 Not Found";
 //const BAD_REQUEST: &str = "400 Bad Request";
+
+struct ThreadPool {
+    workers: Vec<Worker>,
+    sender: Option<mpsc::Sender<Job>>,
+}
+
+struct Worker {
+    id: usize,
+    thread: Option<thread::JoinHandle<()>>,
+}
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+impl Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+        let thread = thread::spawn(move || loop {
+            let msg = receiver.lock().unwrap().recv();
+            match msg {
+                Ok(job) => {
+                    job()
+                }
+                Err(_) => {
+                    break;
+                }
+            }
+        });
+        Worker {
+            id,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl ThreadPool {
+    fn new(size: usize) -> ThreadPool {
+        assert!(size > 0);
+        let (sender, receiver) = mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let mut workers = Vec::with_capacity(size);
+        for id in 0..size {
+            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        }
+        ThreadPool {
+            workers,
+            sender: Some(sender),
+        }
+    }
+    fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let job = Box::new(f);
+        self.sender.as_ref().unwrap().send(job).unwrap();
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        drop(self.sender.take());
+        for worker in &mut self.workers {
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -78,9 +145,12 @@ fn send_text(mut stream: TcpStream, body: &str) {
 
 pub fn listen() {
     let listener = TcpListener::bind("127.0.0.1:5454").unwrap();
+    let pool = ThreadPool::new(4);
     for stream in listener.incoming() {
         let stream = stream.unwrap();
-        handle_conn(stream)
+        pool.execute(|| {
+            handle_conn(stream);
+        });
     }
 }
 
