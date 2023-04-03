@@ -19,13 +19,12 @@ struct ThreadPool {
 }
 
 struct Worker {
-    id: usize,
     thread: Option<thread::JoinHandle<()>>,
 }
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
 impl Worker {
-    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+    fn new(receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
         let thread = thread::spawn(move || loop {
             let msg = receiver.lock().unwrap().recv();
             match msg {
@@ -36,7 +35,6 @@ impl Worker {
             }
         });
         Worker {
-            id,
             thread: Some(thread),
         }
     }
@@ -48,8 +46,8 @@ impl ThreadPool {
         let (sender, receiver) = mpsc::channel();
         let receiver = Arc::new(Mutex::new(receiver));
         let mut workers = Vec::with_capacity(size);
-        for id in 0..size {
-            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        for _ in 0..size {
+            workers.push(Worker::new(Arc::clone(&receiver)));
         }
         ThreadPool {
             workers,
@@ -156,7 +154,7 @@ fn handle_conn(mut stream: TcpStream) {
     let buf_reader = BufReader::new(&mut stream);
     let request_line = buf_reader.lines().next().unwrap().unwrap();
 
-    let request_type = &request_line[0..request_line.find("/").unwrap()].trim();
+    let request_type = &request_line[0..request_line.find('/').unwrap()].trim();
 
     let route_path = request_line
         .strip_prefix(request_type)
@@ -164,7 +162,7 @@ fn handle_conn(mut stream: TcpStream) {
         .strip_suffix("HTTP/1.1")
         .unwrap()
         .trim();
-    handle_paths(stream, &request_type, &route_path)
+    handle_paths(stream, request_type, route_path)
 }
 
 fn handle_paths(stream: TcpStream, request_type: &str, route_path: &str) {
@@ -172,10 +170,10 @@ fn handle_paths(stream: TcpStream, request_type: &str, route_path: &str) {
         "GET" => match route_path {
             "/" => routes::root::send(stream),
             x if (x.strip_prefix("/echo/").is_some())
-                && !(x.strip_prefix("/echo/").unwrap().contains("/")) =>
+                && !(x.strip_prefix("/echo/").unwrap().contains('/')) =>
             {
                 let x = x.strip_prefix("/echo/").unwrap();
-                routes::echo::send(stream, &x);
+                routes::echo::send(stream, x);
             }
             _ => {
                 routes::default::error::send(stream, STATUS_LINE_NOT_FOUND, NOT_FOUND);
