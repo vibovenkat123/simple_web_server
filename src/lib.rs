@@ -29,9 +29,7 @@ impl Worker {
         let thread = thread::spawn(move || loop {
             let msg = receiver.lock().unwrap().recv();
             match msg {
-                Ok(job) => {
-                    job()
-                }
+                Ok(job) => job(),
                 Err(_) => {
                     break;
                 }
